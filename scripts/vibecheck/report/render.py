@@ -401,13 +401,20 @@ def render(res: dict, title: str = "41 vibe check", site: bool = False) -> str:
             parts.append("%s %s" % (marked('%s<span class="money">%s</span>' % (APPROX, escape(money)), "var(--fix)", "mark-fix"),
                                     label % escape(("a month, %s of your %s" % (Fmt.share(res["combined_share"]), noun))
                                                    if known else "a month")))
+        elif f.mode != "usage_share" and res.get("combined_saving_usd") is not None:
+            # too few days for a monthly figure: the dollars for the traced period, so the card still shows dollars
+            money = f.money(res["combined_saving_usd"], approx=True).replace("about ", "")
+            known = res.get("combined_share") is not None
+            parts.append("%s %s" % (marked('%s<span class="money">%s</span>' % (APPROX, escape(money)), "var(--fix)", "mark-fix"),
+                                    label % escape(("in this period, %s of your %s" % (Fmt.share(res["combined_share"]), noun))
+                                                   if known else "in this period")))
         elif not parts or res.get("combined_share") is not None:
             parts.append("%s %s" % (marked(escape(Fmt.share(res["combined_share"])), "var(--fix)", "mark-fix"),
                                     label % escape("of your %s" % noun)))
         big = '<span style="display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:8px 32px">%s</span>' % "".join(
             "<span>%s</span>" % x for x in parts)
-        a('<div class="big">%s</div><p class="sub" style="margin:0">%s</p><div class="fixes">' % (
-            big, escape(texts.potential_line(res, f))))
+        # no sentence under the headline: a period total next to a monthly figure read as two clashing numbers
+        a('<div class="big">%s</div><div class="fixes">' % big)
         for k, fx in enumerate(res["fixes"]):
             # each improvement: dollars a month and the share they are of usage or spend, side by side
             share = Fmt.share(fx["saving_usd"] / res["total_usd"]) if res.get("total_usd") else None

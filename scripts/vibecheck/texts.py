@@ -226,7 +226,8 @@ PRO_FIX_LINE = "The exact fix for your setup is in vibe check Pro."
 
 
 def potential_line(res: dict, f: Fmt) -> str:
-    """The sentence under the potential headline: what the improvements free, and the extra tokens of work that buys.
+    """The potential sentence for Pro's team report (the free report no longer shows it): what the improvements
+    free, and the extra tokens of work that buys.
     Tokens are traced tokens x (work multiple - 1): several fixes make tokens cheaper rather than fewer, so
     "tokens avoided" would be wrong. Without recorded tokens it says so instead of showing 0."""
     lim = res.get("limits") or {}
