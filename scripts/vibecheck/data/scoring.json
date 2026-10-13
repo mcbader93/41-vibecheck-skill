@@ -1,0 +1,74 @@
+{
+  "_doc": "All detector thresholds and score breakpoints. Scores: 100 = clean, 0 = severe. D10 Clear prompting and D11 Lean setup are weighted averages of their parts.",
+  "brief_tokens": 20000,
+  "d1_fix_budget_tokens": 100000,
+  "d1": {
+    "score_100_at_over_floor": 50000,
+    "score_0_at_median_ctx": 500000,
+    "floor_score_100_at": 40000,
+    "floor_score_0_at": 160000,
+    "floor_weight": 0.3
+  },
+  "d2": {
+    "max_output_tokens": 2000,
+    "min_turn_cost_usd": 0.5,
+    "min_turn_ctx_estimated": 100000,
+    "score_0_at_share": 0.4
+  },
+  "d3": {
+    "min_calls_chat": 10,
+    "min_calls_claude_code": 50,
+    "score_100_at_share": 0.1,
+    "score_0_at_share": 0.7
+  },
+  "d4": {
+    "idle_minutes_1h": 60,
+    "idle_minutes_5m": 5,
+    "min_write_chat": 100000,
+    "min_write_claude_code": 20000,
+    "score_0_at_share": 0.4
+  },
+  "d5": {
+    "score_100_at_rate": 0.01,
+    "score_0_at_rate": 0.1
+  },
+  "d6": {
+    "score_0_at_share": 0.15
+  },
+  "d8": {
+    "min_write": 50000
+  },
+  "provisional": {
+    "min_calls": 50,
+    "min_days": 2
+  },
+  "pricing_stale_days": 60,
+  "monthly_min_days": 3,
+  "d10": {
+    "rework_100_at": 0.03,
+    "rework_0_at": 0.25,
+    "vague_0_at": 0.3,
+    "repeated_0_at": 8,
+    "thanks_0_at_share": 0.05,
+    "paste_0_at_share": 0.1,
+    "weights": {
+      "corrections": 3,
+      "openers": 1,
+      "repeats": 1,
+      "thanks": 1,
+      "pastes": 1
+    }
+  },
+  "d11": {
+    "memory_100_at": 3000,
+    "memory_0_at": 20000,
+    "missing_memory_score": 70,
+    "mcp_0_at_share": 0.75,
+    "noisy_0_at_share": 0.15,
+    "weights": {
+      "memory": 1,
+      "mcp": 1,
+      "tools": 1
+    }
+  }
+}

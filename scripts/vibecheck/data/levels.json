@@ -1,0 +1,35 @@
+{
+ "_doc": "Vibe score levels. Edit names and texts freely; keep 5 bands. No em dashes, sentence case. Colours are the level inks, also used as the mascot body fill: red, orange, then a deeper yellow, Diagnose blue, Fix green.",
+ "levels": [
+  {
+   "min": 0,
+   "name": "Prompt roulette",
+   "color": "#FF4D1C",
+   "text": "Sometimes it works, mostly it doesn't, and you pay for every spin. Sessions that never end, caches that go cold over lunch, a novel's worth of context on every call. Good news: nobody has cheaper fixes than you."
+  },
+  {
+   "min": 20,
+   "name": "Token bonfire",
+   "color": "#FF9A1F",
+   "text": "Things get built, and a lot of tokens go up in smoke on the way. Most of your spend carries old context around instead of doing new work. A few habits turn this bonfire into a campfire."
+  },
+  {
+   "min": 40,
+   "name": "Agent wrangler",
+   "color": "#FFE01F",
+   "text": "You know your way around the agent, and it mostly knows its way around you. A couple of leaks still cost real money every week. Patch them and you're a level up."
+  },
+  {
+   "min": 60,
+   "name": "Claude whisperer",
+   "color": "#00B4FF",
+   "text": "Lean sessions, warm caches, few retries. You're ahead of most developers. What's left is fine-tuning: model routing and the odd marathon session."
+  },
+  {
+   "min": 80,
+   "name": "AI superfactory",
+   "color": "#17E68C",
+   "text": "Short sessions, the right model for each job, almost nothing wasted. Your agents run like a well-oiled factory. Frame this and send it to your team lead."
+  }
+ ]
+}
