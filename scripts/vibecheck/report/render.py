@@ -240,14 +240,7 @@ def share_svg(res: dict, with_money: bool, fonts: str) -> str:
                       surface="#FCFAF6", interactive=False, font_scale=1.25)
     radar = radar.replace('<svg viewBox="0 0 600 600" width="100%"', '<svg x="240" y="372" width="600" height="600" viewBox="0 0 600 600"')
     radar = radar.replace('class="rs"', 'class="rs" fill="#5B5650"')
-    lim = res.get("limits") or {}
-    if lim.get("plan") and lim.get("share_saved", 0) >= 0.05 and not with_money:
-        line = "Same plan, %s the work" % texts.multiple(lim["multiple"])
-    elif with_money and res.get("combined_monthly_usd") is not None and res["money"] != "usage_share":
-        money = f.money(res["combined_monthly_usd"], approx=True).replace("about ", "")
-        line = 'Avoidable: about <tspan class="m">%s</tspan> per month' % escape(money)
-    else:
-        line = "Avoidable: %s of %s" % (Fmt.share(res["combined_share"]), ("usage" if res["money"] in ("usage_share", "api_equivalent") else "spend"))
+    stats = _badge_stats(res, f, with_money)
     name = v.get("name", "")
     color = v.get("color", "#F5FF00")
     name_w = 0.52 * 76 * len(name)          # Bricolage Grotesque 700 averages about 0.52em per character
@@ -269,11 +262,38 @@ def share_svg(res: dict, with_money: bool, fonts: str) -> str:
         '<text x="72" y="410" font-size="92" font-weight="700" fill="#0A0A0A" letter-spacing="-2.5">%s<tspan font-size="38" fill="#5B5650" font-weight="400" letter-spacing="0">/100</tspan></text>'
         '<text x="1008" y="410" text-anchor="end" font-size="24" fill="#5B5650">100 is the best score</text>'
         '%s'
-        '<line x1="72" y1="980" x2="1008" y2="980" stroke="#0A0A0A" stroke-width="2"/>'
-        '<text x="72" y="1026" font-size="30" font-weight="700" fill="#0A0A0A">%s</text>'
+        '<line x1="72" y1="948" x2="1008" y2="948" stroke="#0A0A0A" stroke-width="2"/>'
+        '%s'
         '<text x="1008" y="1026" text-anchor="end" font-size="28" fill="#5B5650">get41.ai</text>'
         '</svg>'
-    ) % (logo, mascot, v.get("level", "?"), name_w + 40, color, escape(name), v.get("score", "n/a"), radar, line)
+    ) % (logo, mascot, v.get("level", "?"), name_w + 40, color, escape(name), v.get("score", "n/a"), radar, stats)
+
+
+def _badge_stats(res: dict, f: Fmt, with_money: bool) -> str:
+    """The badge's bottom row: up to two stats side by side, each a big figure over a small caption, like the
+    report's potential card. First the work multiple on the same plan (plan users only), then the saving: dollars a
+    month with the share of spend or usage when with_money is on and dollars are known, otherwise the share alone.
+    Returns an SVG <g id="stats"> group."""
+    lim = res.get("limits") or {}
+    noun = "usage" if res["money"] in ("usage_share", "api_equivalent") else "spend"
+    share = Fmt.share(res.get("combined_share"))
+    items = []
+    if lim.get("plan") and lim.get("share_saved", 0) >= 0.05:
+        items.append((texts.multiple(lim["multiple"]), "the work, same plan"))
+    if with_money and res.get("combined_monthly_usd") is not None and res["money"] != "usage_share":
+        # "≈" instead of "about": the figure must stay short enough to sit beside the multiple
+        money = f.money(res["combined_monthly_usd"], approx=True).replace("about ", "")
+        known = res.get("combined_share") is not None
+        items.append(("≈ " + money, ("a month, %s of your %s" % (share, noun)) if known else "a month"))
+    elif res.get("combined_share") is not None:
+        items.append((share, "of your %s avoidable" % noun))
+    # no share and no dollars: the badge shows only what is known, never "n/a"
+    out = []
+    for k, (big, small) in enumerate(items):
+        x = 72 + 300 * k   # 300px per stat leaves room for get41.ai at the right edge
+        out.append('<text x="%d" y="1004" font-size="48" font-weight="700" fill="#0A0A0A" letter-spacing="-1.2">%s</text>'
+                   '<text x="%d" y="1040" font-size="22" fill="#5B5650">%s</text>' % (x, escape(big), x, escape(small)))
+    return '<g id="stats">%s</g>' % "".join(out)
 
 
 def site_font_css(base: str = "fonts/") -> str:
