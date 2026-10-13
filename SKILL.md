@@ -2,7 +2,7 @@
 name: vibecheck
 description: Shows where your Claude Code money goes and where to improve: the level and vibe score, the 3 areas worth improving with savings. Use for Claude Code cost, tokens, waste or a "vibe check".
 metadata:
-  version: "0.0.2"
+  version: "1.0.0"
 ---
 
 # 41 vibe check
