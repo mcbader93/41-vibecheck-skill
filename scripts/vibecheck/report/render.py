@@ -229,6 +229,10 @@ if(btn){btn.addEventListener('click',function(){
 """
 
 
+# "≈ " set in the text font, for amounts shown in the mono number font
+APPROX = '<span style="font-family:var(--font-sans);margin-right:.15em">≈</span>'
+
+
 def share_svg(res: dict, fonts: str) -> str:
     """1080 x 1080 share image in the get41.ai style: paper, dot grid, ink, one highlighter stroke, the mascot."""
     v = res["vibe"] or {}
@@ -383,24 +387,37 @@ def render(res: dict, title: str = "41 vibe check", site: bool = False) -> str:
     plan = texts.is_plan(res)
     lim = res.get("limits") or {}
     if res["fixes"]:
+        # headline: the work multiple (plan users) next to the saving in dollars and percent, as on the badge
+        noun = "usage" if f.mode in ("usage_share", "api_equivalent") else "spend"
+        label = '<span style="font-size:20px;font-weight:600">%s</span>'
+        parts = []
         if plan and lim.get("share_saved", 0) >= 0.05:
-            big = "%s <span style=\"font-size:20px;font-weight:600\">the work on the same plan</span>" % (
-                marked(escape(texts.multiple(lim["multiple"])), "var(--fix)", "mark-fix"))
-        elif res.get("combined_monthly_usd") is not None and f.mode != "usage_share":
-            big = "%s <span style=\"font-size:20px;font-weight:600\">per month</span>" % (
-                marked('<span class="money">%s</span>' % escape(f.money(res["combined_monthly_usd"], approx=True)), "var(--fix)", "mark-fix"))
-        else:
-            big = marked(escape(Fmt.share(res["combined_share"])), "var(--fix)", "mark-fix")
+            parts.append("%s %s" % (marked(escape(texts.multiple(lim["multiple"])), "var(--fix)", "mark-fix"),
+                                    label % "the work on the same plan"))
+        if res.get("combined_monthly_usd") is not None and f.mode != "usage_share":
+            money = f.money(res["combined_monthly_usd"], approx=True).replace("about ", "")
+            known = res.get("combined_share") is not None
+            # "≈" in the text font: the mono number font would leave a wide gap before the amount
+            parts.append("%s %s" % (marked('%s<span class="money">%s</span>' % (APPROX, escape(money)), "var(--fix)", "mark-fix"),
+                                    label % escape(("a month, %s of your %s" % (Fmt.share(res["combined_share"]), noun))
+                                                   if known else "a month")))
+        elif not parts or res.get("combined_share") is not None:
+            parts.append("%s %s" % (marked(escape(Fmt.share(res["combined_share"])), "var(--fix)", "mark-fix"),
+                                    label % escape("of your %s" % noun)))
+        big = '<span style="display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:8px 32px">%s</span>' % "".join(
+            "<span>%s</span>" % x for x in parts)
         a('<div class="big">%s</div><p class="sub" style="margin:0">%s</p><div class="fixes">' % (
             big, escape(texts.potential_line(res, f))))
         for k, fx in enumerate(res["fixes"]):
-            if plan:
-                extra = ("%s a month at API prices" % f.money(fx["monthly_usd"], approx=True)
-                         if fx.get("monthly_usd") is not None and f.mode == "api_equivalent" else "of your usage limit, estimate")
+            # each improvement: dollars a month and the share they are of usage or spend, side by side
+            share = Fmt.share(fx["saving_usd"] / res["total_usd"]) if res.get("total_usd") else None
+            if fx.get("monthly_usd") is not None and f.mode != "usage_share" and (not plan or f.mode == "api_equivalent"):
+                money = f.money(fx["monthly_usd"], approx=True).replace("about ", "")
+                small = "a month, %s of your %s%s" % (share, noun, ", at API prices" if plan else "") if share else "a month"
+                save = '%s%s<small>%s</small>' % (APPROX, escape(money), escape(small + ", estimate"))
+            elif plan:
                 save = '<span style="font-family:var(--font-display)">frees %s</span><small>%s</small>' % (
-                    escape(Fmt.share(fx.get("limit_share", 0))), escape(extra))
-            elif fx.get("monthly_usd") is not None and f.mode != "usage_share":
-                save = '%s<small>per month, estimate</small>' % escape(f.money(fx["monthly_usd"], approx=True))
+                    escape(Fmt.share(fx.get("limit_share", 0))), "of your usage limit, estimate")
             else:
                 save = '%s<small>%s</small>' % (escape(f.money(fx["saving_usd"], approx=True)),
                                                "in this period, estimate")
