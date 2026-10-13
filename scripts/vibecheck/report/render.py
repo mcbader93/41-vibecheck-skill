@@ -200,9 +200,8 @@ footer .cta{font-family:var(--font-display);font-size:clamp(22px,3vw,28px);font-
 .btn:focus-visible,summary:focus-visible,.pt:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .priv{font-size:13px;color:var(--ink-muted);margin-top:24px;max-width:70ch;grid-column:1 / -1}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:#fff;font-size:13px;padding:6px 10px;border-radius:var(--radius-md);opacity:0;transition:opacity .1s;z-index:9}
-label.toggle{font-size:13px;color:var(--ink-muted);display:inline-flex;gap:6px;align-items:center}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media print{.btns,label.toggle,.tip{display:none}body::before{display:none}.card,.potential{break-inside:avoid}}
+@media print{.btns,.tip{display:none}body::before{display:none}.card,.potential{break-inside:avoid}}
 """
 
 JS = """
@@ -216,8 +215,7 @@ document.querySelectorAll('.pt').forEach(function(g){
 });
 var btn=document.getElementById('share');
 if(btn){btn.addEventListener('click',function(){
- var money=document.getElementById('withmoney');
- var tpl=document.getElementById(money&&money.checked?'share-money':'share-plain');
+ var tpl=document.getElementById('share-money');
  var svg=tpl.innerHTML.trim().replace('/*FONTS*/',document.getElementById('fonts').textContent);
  var img=new Image();
  var url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
@@ -231,7 +229,7 @@ if(btn){btn.addEventListener('click',function(){
 """
 
 
-def share_svg(res: dict, with_money: bool, fonts: str) -> str:
+def share_svg(res: dict, fonts: str) -> str:
     """1080 x 1080 share image in the get41.ai style: paper, dot grid, ink, one highlighter stroke, the mascot."""
     v = res["vibe"] or {}
     levels = v.get("levels") or []
@@ -240,7 +238,7 @@ def share_svg(res: dict, with_money: bool, fonts: str) -> str:
                       surface="#FCFAF6", interactive=False, font_scale=1.25)
     radar = radar.replace('<svg viewBox="0 0 600 600" width="100%"', '<svg x="240" y="372" width="600" height="600" viewBox="0 0 600 600"')
     radar = radar.replace('class="rs"', 'class="rs" fill="#5B5650"')
-    stats = _badge_stats(res, f, with_money)
+    stats = _badge_stats(res, f)
     name = v.get("name", "")
     color = v.get("color", "#F5FF00")
     name_w = 0.52 * 76 * len(name)          # Bricolage Grotesque 700 averages about 0.52em per character
@@ -269,10 +267,11 @@ def share_svg(res: dict, with_money: bool, fonts: str) -> str:
     ) % (logo, mascot, v.get("level", "?"), name_w + 40, color, escape(name), v.get("score", "n/a"), radar, stats)
 
 
-def _badge_stats(res: dict, f: Fmt, with_money: bool) -> str:
+def _badge_stats(res: dict, f: Fmt) -> str:
     """The badge's bottom row: up to two stats side by side, each a big figure over a small caption, like the
     report's potential card. First the work multiple on the same plan (plan users only), then the saving: dollars a
-    month with the share of spend or usage when with_money is on and dollars are known, otherwise the share alone.
+    month with the share of spend or usage when dollars are known, otherwise the share alone. The badge always
+    carries the money figures (the owner's call: there is no switch to leave them out).
     Returns an SVG <g id="stats"> group."""
     lim = res.get("limits") or {}
     noun = "usage" if res["money"] in ("usage_share", "api_equivalent") else "spend"
@@ -280,7 +279,7 @@ def _badge_stats(res: dict, f: Fmt, with_money: bool) -> str:
     items = []
     if lim.get("plan") and lim.get("share_saved", 0) >= 0.05:
         items.append((texts.multiple(lim["multiple"]), "the work, same plan"))
-    if with_money and res.get("combined_monthly_usd") is not None and res["money"] != "usage_share":
+    if res.get("combined_monthly_usd") is not None and res["money"] != "usage_share":
         # "≈" instead of "about": the figure must stay short enough to sit beside the multiple
         money = f.money(res["combined_monthly_usd"], approx=True).replace("about ", "")
         known = res.get("combined_share") is not None
@@ -335,8 +334,7 @@ def render(res: dict, title: str = "41 vibe check", site: bool = False) -> str:
             v["level"], ' <span class="tag">provisional, little data</span>' if v["provisional"] else ""))
         # the mascot with the badge download under it; the share templates are at the end of the page
         a('<div class="side">%s<div class="btns">'
-          '<button class="btn sec" id="share" type="button">Download your badge</button>'
-          '<label class="toggle"><input type="checkbox" id="withmoney"> include dollar amounts</label></div></div>' % (
+          '<button class="btn sec" id="share" type="button">Download your badge</button></div></div>' % (
               mascot_svg(v["level"], 150, "41, the mascot, reacting to your level")))
         a('<div class="level"><h1 id="lvl">%s</h1></div>' % marked(escape(v["name"]), v["color"], "mark-hero"))
         a('<div class="score num" aria-label="Vibe score %d out of 100">%d<small>/100</small></div>' % (v["score"], v["score"]))
@@ -442,8 +440,7 @@ def render(res: dict, title: str = "41 vibe check", site: bool = False) -> str:
 
     a(_footer(res))
     # share templates
-    a('<template id="share-plain">%s</template>' % share_svg(res, False, fonts))
-    a('<template id="share-money">%s</template>' % share_svg(res, True, fonts))
+    a('<template id="share-money">%s</template>' % share_svg(res, fonts))
     a("</div>%s</body></html>" % ('<script src="report.js" defer></script>' if site else "<script>%s</script>" % JS))
     return "".join(h)
 
