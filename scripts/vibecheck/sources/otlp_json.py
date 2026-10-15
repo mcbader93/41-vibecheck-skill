@@ -5,6 +5,8 @@ Supports:
   (your trace exports, agent frameworks)
 - Claude Code native beta traces: claude_code.interaction > claude_code.llm_request / claude_code.tool
 - Claude Code native log events: api_request and tool_result (Claude Code's OpenTelemetry log export)
+  plus the extended events (api_error, api_retries_exhausted, tool_decision, compaction, subagent_completed,
+  assistant_response) as numbers and enums only
 - a single OTLP JSON document, or JSON Lines with one OTLP document per line (collector file exporter)
 
 Attribute names differ between sources and versions, so every field has a list of aliases. Only numeric,
@@ -17,10 +19,13 @@ metrics. Typed prompt text is dropped unless the caller passes keep_prompt_text=
 
 import bisect
 import json
+import math
+import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from ..models import normalize_model
-from ..records import CallRecord, Dataset, PromptRecord, ToolRecord
+from ..records import (ApiErrorRecord, CallRecord, CompactionRecord, Dataset, PromptRecord, ResponseRecord,
+                       RetryExhaustedRecord, SubagentRecord, ToolDecisionRecord, ToolRecord)
 from . import signals
 from ..util import h, parse_ts, pick, to_int
 
@@ -39,6 +44,52 @@ SESSION = ("gen_ai.conversation.id", "session.id", "conversation.id")
 TOOL = ("gen_ai.tool.name", "tool.name", "tool_name", "name")
 TURN = ("claude_code.prompt.id", "prompt.id", "session.turn")
 RECORDED = ("usage.recorded", "gen_ai.usage.recorded")
+COST = ("cost_usd", "claude_code.cost_usd")
+EFFORT = ("effort", "reasoning_effort")
+QUERY_SOURCE = ("query_source",)
+RESULT_SIZE = ("tool_result_size_bytes",)
+INPUT_SIZE = ("tool_input_size_bytes",)
+DURATION = ("duration_ms",)
+DECISION_TYPE = ("decision_type",)
+DECISION_SOURCE = ("decision_source",)
+STATUS = ("status_code",)
+RESPONSE_LEN = ("response_length",)
+_ENUM_OK = re.compile(r"[a-z0-9_.:-]{1,40}$")
+
+
+def _enum(v: Any) -> Optional[str]:
+    """A short lower-case enum token, or None. Anything longer or with other characters (text, paths, ids) is
+    dropped, so a field that is meant to be an enum can never smuggle typed content into a record."""
+    if not isinstance(v, str):
+        return None
+    v = v.strip().lower()
+    return v if _ENUM_OK.match(v) else None
+
+
+def _flag(v: Any) -> Optional[bool]:
+    """True/False from a boolean or "true"/"false" string; None for anything else."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str) and v.strip().lower() in ("true", "false"):
+        return v.strip().lower() == "true"
+    return None
+
+
+def _num(v: Any) -> Optional[float]:
+    """A finite, non-negative float, or None (garbage, NaN, negative and booleans are all "not recorded")."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) and x >= 0 else None
+
+
+def _nat(v: Any) -> Optional[int]:
+    """A non-negative integer, or None; goes through _num so "NaN" and "-3" are rejected the same way."""
+    x = _num(v)
+    return int(x) if x is not None else None
 
 
 def _val(v: Any) -> Any:
@@ -237,7 +288,9 @@ def _from_metrics(metrics: List[dict], cb: Callable[[Dict[str, Any], Dict[str, s
             ident = _identity(keys, a, x["res"])
             g = groups.setdefault(tuple(sorted(ident.items())), {
                 "identity": ident, "tokens": None, "cost_usd": None, "commits": None, "lines_added": None,
-                "lines_removed": None, "lines_changed": None, "ts_first": None, "ts_last": None})
+                "lines_removed": None, "lines_changed": None, "ts_first": None, "ts_last": None,
+                "pull_requests": None, "active_user_s": None, "active_cli_s": None,
+                "edit_decisions": None, "sessions_by_start": None})
             if name == "token.usage":
                 kind = _TOKEN_TYPES.get(str(a.get("type", "")).lower())
                 if kind is None:
@@ -256,6 +309,24 @@ def _from_metrics(metrics: List[dict], cb: Callable[[Dict[str, Any], Dict[str, s
                     g["lines_changed"] = int((g["lines_changed"] or 0) + val)
                 else:
                     continue
+            elif name == "pull_request.count":
+                g["pull_requests"] = int((g["pull_requests"] or 0) + val)
+            elif name == "active_time.total":
+                kind = _enum(a.get("type"))
+                if kind not in ("user", "cli"):
+                    continue
+                k = "active_%s_s" % kind
+                g[k] = (g[k] or 0) + val
+            elif name == "code_edit_tool.decision":
+                # allowlist: tool_name is free text in the feed, only the four edit tools may pass
+                tool = str(a.get("tool_name") or "")
+                key = (_enum(a.get("decision")), _enum(a.get("source")), tool if tool in _EDIT_TOOLS else None)
+                g["edit_decisions"] = g["edit_decisions"] or {}
+                g["edit_decisions"][key] = int(g["edit_decisions"].get(key, 0) + val)
+            elif name == "session.count":
+                key = _enum(a.get("start_type")) or "unknown"
+                g["sessions_by_start"] = g["sessions_by_start"] or {}
+                g["sessions_by_start"][key] = int(g["sessions_by_start"].get(key, 0) + val)
             else:
                 continue
             ts = parse_ts(dp.get("timeUnixNano"))
@@ -265,6 +336,9 @@ def _from_metrics(metrics: List[dict], cb: Callable[[Dict[str, Any], Dict[str, s
     for g in groups.values():
         ident = g.pop("identity")
         cb(g, ident)
+
+
+_EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
 
 def _emit_identity(ctx: dict, rec: Any, *attr_dicts: dict) -> None:
@@ -277,6 +351,14 @@ def _emit_identity(ctx: dict, rec: Any, *attr_dicts: dict) -> None:
         cb(rec, ident)
 
 
+def _command_name(a: dict) -> Optional[str]:
+    """The user_prompt command_name, only if it is a built-in slash command; custom commands may be named after
+    private things, so they are dropped."""
+    name = a.get("command_name")
+    name = name.strip().lstrip("/").lower() if isinstance(name, str) else None
+    return name if name in signals.BUILTIN_COMMANDS else None
+
+
 def _prompt_record(a: dict, sid: str, turn: str, ts: float, first: bool, keep_text: bool) -> Optional[PromptRecord]:
     """One typed message from a user_prompt event. Length-only unless keep_text: Claude Code only sends the text
     when the user turned on OTEL_LOG_USER_PROMPTS, and the free path must never read it even then."""
@@ -287,11 +369,13 @@ def _prompt_record(a: dict, sid: str, turn: str, ts: float, first: bool, keep_te
             return None
         rec = PromptRecord(session_id=sid, turn_id=turn, ts=ts, first=first, **fl)
         rec.text = text  # type: ignore[attr-defined]  # not a dataclass field: to_dict() never carries it
+        rec.command = rec.command or _command_name(a)
         return rec
     n = to_int(a.get("prompt_length"))
     if n is None:
         return None
-    return PromptRecord(session_id=sid, turn_id=turn, ts=ts, chars=n, words=0, first=first)
+    return PromptRecord(session_id=sid, turn_id=turn, ts=ts, chars=n, words=0, first=first,
+                        command=_command_name(a), has_text=False)
 
 
 def _from_spans(ds: Dataset, spans: List[dict], ctx: dict) -> None:
@@ -363,6 +447,68 @@ def _from_spans(ds: Dataset, spans: List[dict], ctx: dict) -> None:
         ds.sources.append("OTel traces (%d session%s)" % (n_sessions, "" if n_sessions == 1 else "s"))
 
 
+def _api_error(ds: Dataset, a: dict, sid: str, tid: str, ts: float) -> Any:
+    """api_error event -> ds.api_errors."""
+    r = ApiErrorRecord(session_id=sid, ts=ts, model=normalize_model(pick(a, MODEL)), status_code=_nat(pick(a, STATUS)),
+                       attempt=_nat(a.get("attempt")), duration_ms=_nat(pick(a, DURATION)))
+    ds.api_errors.append(r)
+    return r
+
+
+def _retries_exhausted(ds: Dataset, a: dict, sid: str, tid: str, ts: float) -> Any:
+    """api_retries_exhausted event -> ds.retries_exhausted."""
+    r = RetryExhaustedRecord(session_id=sid, ts=ts, status_code=_nat(pick(a, STATUS)),
+                             total_attempts=_nat(a.get("total_attempts")),
+                             total_retry_duration_ms=_nat(a.get("total_retry_duration_ms")))
+    ds.retries_exhausted.append(r)
+    return r
+
+
+def _tool_decision(ds: Dataset, a: dict, sid: str, tid: str, ts: float) -> Any:
+    """tool_decision event -> ds.tool_decisions; a user_abort also lands in ds.interrupts (the interrupts habit)."""
+    r = ToolDecisionRecord(session_id=sid, turn_id=tid, ts=ts, decision=_enum(a.get("decision")),
+                           source=_enum(a.get("source")), tool_source=_enum(a.get("tool_source")))
+    ds.tool_decisions.append(r)
+    if r.source == "user_abort":
+        ds.interrupts.append(("me", sid, tid, ts))
+    return r
+
+
+def _compaction(ds: Dataset, a: dict, sid: str, tid: str, ts: float) -> Any:
+    """compaction event -> ds.compaction_events; every one that did not fail is also a (dev, session, ts) entry in
+    ds.compactions, the shape the compactions habit already reads."""
+    r = CompactionRecord(session_id=sid, ts=ts, trigger=_enum(a.get("trigger")), success=_flag(a.get("success")),
+                         pre_tokens=_nat(a.get("pre_tokens")), post_tokens=_nat(a.get("post_tokens")))
+    ds.compaction_events.append(r)
+    if r.success is not False:
+        ds.compactions.append(("me", sid, ts))
+    return r
+
+
+def _subagent(ds: Dataset, a: dict, sid: str, tid: str, ts: float) -> Any:
+    """subagent_completed event -> ds.subagent_runs."""
+    r = SubagentRecord(session_id=sid, ts=ts, total_tokens=_nat(a.get("total_tokens")),
+                       total_tool_uses=_nat(a.get("total_tool_uses")), duration_ms=_nat(pick(a, DURATION)),
+                       model=normalize_model(pick(a, MODEL)), model_swapped=_flag(a.get("model_swapped")),
+                       is_built_in=_flag(a.get("is_built_in")))
+    ds.subagent_runs.append(r)
+    return r
+
+
+def _response(ds: Dataset, a: dict, sid: str, tid: str, ts: float) -> Any:
+    """assistant_response event -> ds.responses (the length only)."""
+    r = ResponseRecord(session_id=sid, turn_id=tid, ts=ts, response_length=_nat(pick(a, RESPONSE_LEN)),
+                       query_source=_enum(pick(a, QUERY_SOURCE)))
+    ds.responses.append(r)
+    return r
+
+
+# log event name -> builder for the telemetry-only events; each reads an allowlist of numbers and enums
+_EVENT_BUILDERS = {"api_error": _api_error, "api_retries_exhausted": _retries_exhausted,
+                   "tool_decision": _tool_decision, "compaction": _compaction,
+                   "subagent_completed": _subagent, "assistant_response": _response}
+
+
 def _from_logs(ds: Dataset, logs: List[dict], ctx: dict) -> None:
     """Build call, tool and (length-only) prompt records from Claude Code log events."""
     h = ctx["hasher"]
@@ -386,14 +532,15 @@ def _from_logs(ds: Dataset, logs: List[dict], ctx: dict) -> None:
                              ts_start=start, ts_end=end, model=normalize_model(pick(a, MODEL)),
                              is_subagent=bool(a.get("agent_id")))
             _usage(rec, a)
-            cost = a.get("cost_usd")
-            try:
-                if cost is not None:
-                    bill += float(cost)
-                    bill_seen = True
-                    scope.append(len(ds.calls))
-            except (TypeError, ValueError):
-                pass
+            rec.cost_usd = _num(pick(a, COST))
+            rec.effort = _enum(pick(a, EFFORT))
+            rec.query_source = _enum(pick(a, QUERY_SOURCE))
+            speed = _enum(a.get("speed"))
+            rec.speed = {"normal": "standard"}.get(speed, speed)
+            if rec.cost_usd is not None:
+                bill += rec.cost_usd
+                bill_seen = True
+                scope.append(len(ds.calls))
             ds.calls.append(rec)
             _emit_identity(ctx, rec, a, x["res"])
         elif ev == "user_prompt" and ctx["prompts"]:
@@ -408,9 +555,17 @@ def _from_logs(ds: Dataset, logs: List[dict], ctx: dict) -> None:
             succ = a.get("success")
             ok = not (succ is False or (isinstance(succ, str) and succ.lower() == "false"))
             trec = ToolRecord(session_id=h(session_raw), turn_id=h(str(session_raw) + str(turn_raw)),
-                              ts=end, tool=str(a.get("tool_name") or "unknown")[:80], ok=ok)
+                              ts=end, tool=str(a.get("tool_name") or "unknown")[:80], ok=ok,
+                              result_chars=_nat(pick(a, RESULT_SIZE)), tool_input_bytes=_nat(pick(a, INPUT_SIZE)),
+                              duration_ms=_nat(pick(a, DURATION)), decision_type=_enum(pick(a, DECISION_TYPE)),
+                              decision_source=_enum(pick(a, DECISION_SOURCE)))
             ds.tools.append(trec)
             _emit_identity(ctx, trec, a, x["res"])
+        elif ev in _EVENT_BUILDERS:
+            sid, tid = h(session_raw), h(str(session_raw) + str(turn_raw))
+            rec = _EVENT_BUILDERS[ev](ds, a, sid, tid, end)
+            if rec is not None:
+                _emit_identity(ctx, rec, a, x["res"])
     if ds.calls:
         # attach tools to the latest call before them in the same session
         by_session: Dict[str, List[int]] = {}

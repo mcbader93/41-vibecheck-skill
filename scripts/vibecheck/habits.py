@@ -124,8 +124,14 @@ class Habits:
 
     # ---------- prompts ----------
 
+    def _text_prompts(self) -> list:
+        """Prompts that carry text-derived flags. A telemetry feed without OTEL_LOG_USER_PROMPTS sends lengths only,
+        so corrections, openers, repeats and thanks cannot be judged; scoring them as 0 findings would hand out a
+        false 100 on Clear prompting. In a mixed dataset the length-only prompts are left out of every denominator."""
+        return [p for p in self.ds.prompts if p.has_text]
+
     def repeated(self) -> Optional[dict]:
-        P = self.ds.prompts
+        P = self._text_prompts()
         if not P:
             return None
         sessions = defaultdict(set)
@@ -143,11 +149,10 @@ class Habits:
                           n=len(rep), thr=thr, top=rep[0], n_sess=n_sess)
 
     def thanks(self) -> Optional[dict]:
-        P = [p for p in self.ds.prompts if p.thanks]
-        if not self.ds.prompts:
+        if not self._text_prompts():
             return None
         rows = []
-        for p in P:
+        for p in (p for p in self._text_prompts() if p.thanks):
             idx = self.a.turns.get(p.dev + ":" + p.turn_id, [])
             if idx and max(self.ds.calls[i].ctx for i in idx) >= self.cfg["thanks_min_ctx"]:
                 rows.append(sum(self.a._c(i) for i in idx))
@@ -159,7 +164,7 @@ class Habits:
                           total=self._money(usd), each=self._money(usd / len(rows)))
 
     def rework(self) -> Optional[dict]:
-        P = self.ds.prompts
+        P = self._text_prompts()
         typed = [p for p in P if p.chars and not p.first]
         if len(typed) < 5:
             return None
@@ -183,7 +188,7 @@ class Habits:
                           rw=len(rw), typed=len(typed), money=self._money(usd))
 
     def vague(self) -> Optional[dict]:
-        first = [p for p in self.ds.prompts if p.first]
+        first = [p for p in self._text_prompts() if p.first]
         if not first:
             return None
         v = [p for p in first if p.vague]
