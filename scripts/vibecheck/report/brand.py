@@ -71,7 +71,7 @@ _EYES = {
 }
 
 LOGO_DIGITS = (
-    '<g fill="#FFFFFF" transform="translate(324.33 578.40) scale(0.31781 -0.31781)">'
+    '<g fill="#FFFFFF" transform="translate(287.60 606.50) scale(0.38 -0.38)">'
     '<path d="M390 0V145H65V326L346 730H486L185 293V255H390V420H515V0Z"/>'
     '<path d="M84 0V110H274V619L83 477V609L251 730H399V110H552V0Z" transform="translate(564 0)"/></g>'
 )
